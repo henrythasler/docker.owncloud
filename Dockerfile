@@ -1,8 +1,9 @@
-FROM phusion/baseimage:0.9.13
+FROM phusion/baseimage:0.9.15
 MAINTAINER Henry Thasler <docker@thasler.org>
 
 # Set correct environment variables.
 ENV HOME /root
+ENV HTML /usr/share/nginx/html
 
 # Regenerate SSH host keys. baseimage-docker does not contain any, so you
 # have to do that yourself. You may also comment out this instruction; the
@@ -15,6 +16,9 @@ CMD ["/sbin/my_init"]
 # prepare for install
 RUN apt-get update
 
+# install distro updates
+RUN apt-get upgrade -y
+
 # install dependencies
 RUN apt-get install -y --no-install-recommends \
                 curl \
@@ -23,7 +27,21 @@ RUN apt-get install -y --no-install-recommends \
                 zlib1g-dev
 
 # prepare nginx+php-fpm environment
-RUN apt-get install -y --no-install-recommends nginx sqlite3 php5-sqlite php5-fpm php5-curl php5-gd php5-cli php5-mcrypt php5-mysql php-apc && apt-get remove -y nginx
+RUN apt-get install -y --no-install-recommends \
+                nginx \
+                sqlite3 \
+                php5-sqlite \
+                php5-fpm \
+                php5-curl \
+                php5-gd \
+                php5-cli \
+                php5-mcrypt \
+                php5-mysql \
+                php5-json \
+                php5-intl \
+                php5-imagick \
+                php-apc \
+                && apt-get remove -y nginx
 
 # start fpm-module on startup
 RUN     { \
@@ -32,31 +50,14 @@ RUN     { \
         echo 'exit 0'; \
         } > /etc/rc.local
 
-# set default site config incl. php-fpm
-RUN     { \
-        echo 'server {'; \
-        echo '        listen 80 default_server;'; \
-        echo '        listen [::]:80 default_server ipv6only=on;'; \
-        echo '        root /usr/share/nginx/html;'; \
-        echo '        index index.html index.htm;'; \
-        echo '        server_name localhost;'; \
-        echo '        location / {'; \
-        echo '                try_files $uri $uri/ =404;'; \
-        echo '        }'; \
-        echo '        location ~ [^/].php(/|$) {'; \
-        echo '                fastcgi_split_path_info ^(.+?.php)(/.*)$;'; \
-        echo '                if (!-f $document_root$fastcgi_script_name) {'; \
-        echo '                   return 404;'; \
-        echo '                }'; \
-        echo '                fastcgi_pass unix:/var/run/php5-fpm.sock;'; \
-        echo '                fastcgi_index index.php;'; \
-        echo '                include fastcgi_params;'; \
-        echo '        }'; \
-        echo '}'; \
-        } > /etc/nginx/sites-available/default
+#RUN mkdir /etc/service/php5-fpm
+#ADD php5-fpm.sh /etc/service/php5-fpm/run
 
-# hide X-Powered-By: $PHP_VERSION in response header
+
+# modify php-config
 RUN sed -i 's/\(expose_php *= *\).*/\1Off/' /etc/php5/fpm/php.ini
+RUN sed -i 's/\(upload_max_filesize *= *\).*/\11024/' /etc/php5/fpm/php.ini
+RUN sed -i 's/\(post_max_size *= *\).*/\11024M/' /etc/php5/fpm/php.ini
 
 # setup php test page
 #RUN    { \
@@ -64,14 +65,16 @@ RUN sed -i 's/\(expose_php *= *\).*/\1Off/' /etc/php5/fpm/php.ini
 #       } > /usr/share/nginx/html/info.php
         
 # define the desired versions
-ENV NGINX_VERSION nginx-1.7.4
-ENV OPENSSL_VERSION openssl-1.0.1i
-ENV PCRE_VERSION pcre-8.35
+ENV NGINX_VERSION nginx-1.7.8
+ENV OPENSSL_VERSION openssl-1.0.1j
+ENV PCRE_VERSION pcre-8.36
+ENV OWNCLOUD_VERSION owncloud-7.0.3
 
 # path to download location
 ENV NGINX_SOURCE http://nginx.org/download/
 ENV OPENSSL_SOURCE https://www.openssl.org/source/
 ENV PCRE_SOURCE ftp://ftp.csx.cam.ac.uk/pub/software/programming/pcre/
+ENV OWNCLOUD_SOURCE https://download.owncloud.org/community/
 
 # build path
 ENV BPATH /usr/src
@@ -107,8 +110,7 @@ RUN gpg --keyserver keys.gnupg.net --recv-key \
     
 # Philip Hazel's public GPG key. 
 RUN gpg --keyserver keys.gnupg.net --recv-key FB0F43D8
-
-    
+   
 # download source packages and signatures
 RUN cd $BPATH \
         && wget $PCRE_SOURCE$PCRE_VERSION.tar.gz \
@@ -125,8 +127,7 @@ RUN cd $BPATH \
         && gpg --verify $NGINX_VERSION.tar.gz.asc \
         && tar xzf $PCRE_VERSION.tar.gz \
         && tar xzf $OPENSSL_VERSION.tar.gz \
-        && tar xzf $NGINX_VERSION.tar.gz \
-        && rm *.tar.gz*
+        && tar xzf $NGINX_VERSION.tar.gz
 
 # build and install nginx
 RUN cd $BPATH/$NGINX_VERSION && ./configure \
@@ -146,19 +147,28 @@ RUN cd $BPATH/$NGINX_VERSION && ./configure \
         --without-mail_pop3_module \
         --without-mail_smtp_module \
         --without-mail_imap_module \
-        && make && make install \
-        && { \
-                echo; \
-                echo '# stay in the foreground so Docker has a process to track'; \
-                echo 'daemon off;'; \
-           } >> /etc/nginx/nginx.conf
-
+        && make && make install
+        
+# Setup nginx config for owncloud
+ADD owncloud-main.conf /etc/nginx/main.d/owncloud-main.conf
+ADD owncloud.conf /etc/nginx/sites-enabled/owncloud.conf
+           
 # Exclude nginx from future updates. Clean up APT when done.
 RUN apt-mark hold nginx nginx-core nginx-common && apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
+# download owncloud files
+RUN cd $HTML \
+        && wget $OWNCLOUD_SOURCE$OWNCLOUD_VERSION.tar.bz2 \
+        && wget $OWNCLOUD_SOURCE$OWNCLOUD_VERSION.tar.bz2.asc \
+        && wget https://owncloud.org/owncloud.asc
+
+# verify owncloud archive file        
+RUN cd $HTML \
+        && gpg --import owncloud.asc \
+        && gpg --verify $OWNCLOUD_VERSION.tar.bz2.asc \
+        && tar -xjf $OWNCLOUD_VERSION.tar.bz2
+        
 # webserver root directory
 WORKDIR /usr/share/nginx/html
 
-EXPOSE 80
-
-
+EXPOSE 443
