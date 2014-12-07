@@ -12,9 +12,10 @@ RUN apt-get update
 
 # install additional modules
 RUN apt-get install -y --no-install-recommends \
+#                goaccess \
                 php5-intl \
                 php5-mcrypt \
-                php5-imagick
+                php5-imagick 
 
 # Clean up APT when done.
 RUN apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
@@ -56,7 +57,7 @@ RUN cd $ROOT \
 # add and modify autoconfig
 ADD autoconfig.php $ROOT/owncloud/config/autoconfig.php
 RUN sed -i "s#ROOT#$ROOT#" $ROOT/owncloud/config/autoconfig.php
-        
+
 # setup access restrictions
 RUN  cd $ROOT \
         && chown -R root:root owncloud \
@@ -72,7 +73,10 @@ RUN  cd $ROOT \
 # setup cronjob for owncloud; make sure to change the setting in owncloud to cron
 RUN ( crontab -l 2>/dev/null | grep -Fv owncloud ; printf -- "*/15  *  *  *  * php -f $ROOT/owncloud/cron.php\n" ) | crontab
 
-# webserver root directory
-WORKDIR $ROOT
+# config file for goaccess
+#ADD goaccess.conf $ROOT/goaccess.conf
+
+# setup cronjob for goaccess
+#RUN ( crontab -l 2>/dev/null | grep -Fv owncloud ; printf -- "*/15  *  *  *  * php -f $ROOT/owncloud/cron.php\n" ) | crontab
 
 EXPOSE 443
