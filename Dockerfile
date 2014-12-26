@@ -37,7 +37,10 @@ RUN apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 # modify php-config to enable larger uploads (default 1GB); modify as needed
 RUN sed -i 's/\(upload_max_filesize *= *\).*/\11024M/' /etc/php5/fpm/php.ini
 RUN sed -i 's/\(post_max_size *= *\).*/\11024M/' /etc/php5/fpm/php.ini
-        
+
+# disable output_buffering according to http://doc.owncloud.org/server/7.0/admin_manual/configuration/big_file_upload_configuration.html
+RUN sed -i 's/\(output_buffering *= *\).*/\10/' /etc/php5/fpm/php.ini
+
 # Setup nginx config for owncloud; replace ENV-values in files with given values (see above) 
 ADD owncloud.conf /etc/nginx/sites-enabled/owncloud.conf
 RUN rm /etc/nginx/sites-enabled/default
@@ -88,13 +91,13 @@ RUN cd $BPATH \
 # install GeoIp database
 RUN cd $ROOT \
         && wget http://geolite.maxmind.com/download/geoip/database/GeoLiteCity.dat.gz \
-        && gzip -dv GeoLiteCity.gz
+        && gzip -dv GeoLiteCity.dat.gz
         
 # add config file for goaccess cron job and set path to GeoIP-DB
 ADD goaccess.conf $ROOT/goaccess.conf
 RUN sed -i "s#ROOT#$ROOT#" $ROOT/goaccess.conf
 
 # setup cronjob for goaccess
-RUN ( crontab -l 2>/dev/null | grep -Fv owncloud ; printf -- "0  0  *  *  * /usr/local/bin/goaccess -p $ROOT/goaccess.conf -f /var/log/nginx/access.log > $ROOT/owncloud/log.html\n" ) | crontab
+RUN ( crontab -l 2>/dev/null | grep -Fv goaccess ; printf -- "0  0  *  *  * /usr/local/bin/goaccess -p $ROOT/goaccess.conf -f /var/log/nginx/access.log > $ROOT/owncloud/log.html\n" ) | crontab
 
 EXPOSE 443
